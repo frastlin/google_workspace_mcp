@@ -79,13 +79,12 @@ def wrap_server_tool_method(server):
 
 
 def filter_server_tools(server):
-    """Remove disabled tools from the server after registration."""
+    """Remove disabled tools and configure output schemas after registration."""
     enabled_tools = get_enabled_tools()
     oauth21_enabled = is_oauth21_enabled()
-    if enabled_tools is None and not oauth21_enabled:
-        return
 
     tools_removed = 0
+    schemas_cleared = 0
 
     # Access FastMCP's tool registry via _tool_manager._tools
     if hasattr(server, "_tool_manager"):
@@ -93,6 +92,7 @@ def filter_server_tools(server):
         if hasattr(tool_manager, "_tools"):
             tool_registry = tool_manager._tools
 
+            # First pass: remove disabled tools
             tools_to_remove = set()
             if enabled_tools is not None:
                 for tool_name in list(tool_registry.keys()):
@@ -108,10 +108,27 @@ def filter_server_tools(server):
                 if tool_name == "start_google_auth":
                     logger.info("OAuth 2.1 enabled: disabling start_google_auth tool")
 
+            # Second pass: clear output_schema for string-wrapped tools
+            # This ensures clean content block display instead of {"result": "..."}
+            for tool in tool_registry.values():
+                if (
+                    tool.output_schema is not None
+                    and isinstance(tool.output_schema, dict)
+                    and tool.output_schema.get("x-fastmcp-wrap-result")
+                ):
+                    tool.output_schema = None
+                    schemas_cleared += 1
+
     if tools_removed > 0:
         enabled_count = len(enabled_tools) if enabled_tools is not None else "all"
         logger.info(
             "Tool filtering: removed %s tools, %s enabled",
             tools_removed,
             enabled_count,
+        )
+
+    if schemas_cleared > 0:
+        logger.info(
+            "Content blocks: cleared output_schema on %s string-returning tools",
+            schemas_cleared,
         )

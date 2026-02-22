@@ -329,11 +329,7 @@ def _prepare_gmail_message(
 
                 # Sanitize filename to prevent header injection
                 # Only need to remove newlines/carriage returns as add_header handles encoding
-                safe_filename = (
-                    (filename or "")
-                    .replace("\r", "")
-                    .replace("\n", "")
-                )
+                safe_filename = (filename or "").replace("\r", "").replace("\n", "")
 
                 # Use add_header with filename parameter for proper RFC 2231 encoding of non-ASCII characters
                 part.add_header(

@@ -327,17 +327,17 @@ def _prepare_gmail_message(
                 part.set_payload(file_data)
                 encoders.encode_base64(part)
 
-                # Sanitize filename to prevent header injection and ensure valid quoting
+                # Sanitize filename to prevent header injection
+                # Only need to remove newlines/carriage returns as add_header handles encoding
                 safe_filename = (
                     (filename or "")
                     .replace("\r", "")
                     .replace("\n", "")
-                    .replace("\\", "\\\\")
-                    .replace('"', r"\"")
                 )
 
+                # Use add_header with filename parameter for proper RFC 2231 encoding of non-ASCII characters
                 part.add_header(
-                    "Content-Disposition", f'attachment; filename="{safe_filename}"'
+                    "Content-Disposition", "attachment", filename=safe_filename
                 )
 
                 message.attach(part)

@@ -102,9 +102,6 @@ def test_rfc_2231_encoding_format():
         "filename*=" in content_disposition or  # RFC 2231 encoded
         "Prüfbericht.pdf" in content_disposition  # Raw UTF-8 (also valid)
     )
-    
-    print(f"Content-Disposition header: {content_disposition}")
-    print(f"Filename successfully encoded: {filename}")
 
 
 if __name__ == "__main__":

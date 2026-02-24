@@ -327,17 +327,20 @@ def _prepare_gmail_message(
                 part.set_payload(file_data)
                 encoders.encode_base64(part)
 
-                # Sanitize filename to prevent header injection and ensure valid quoting
+                # Use add_header with keyword argument so Python's email
+                # library applies RFC 2231 encoding for non-ASCII filenames
+                # (e.g. filename*=utf-8''Pr%C3%BCfbericht.pdf).  Manual
+                # string formatting would drop non-ASCII characters and cause
+                # Gmail to display "noname".
                 safe_filename = (
-                    (filename or "")
+                    (filename or "attachment")
                     .replace("\r", "")
                     .replace("\n", "")
-                    .replace("\\", "\\\\")
-                    .replace('"', r"\"")
-                )
+                    .replace("\x00", "")
+                ) or "attachment"
 
                 part.add_header(
-                    "Content-Disposition", f'attachment; filename="{safe_filename}"'
+                    "Content-Disposition", "attachment", filename=safe_filename
                 )
 
                 message.attach(part)

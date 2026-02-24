@@ -20,6 +20,7 @@ import sys
 from typing import Any, Dict, List, Optional
 
 from auth.oauth_config import set_transport_mode
+from core.tool_registry import _get_tool_components
 
 logger = logging.getLogger(__name__)
 
@@ -36,21 +37,14 @@ def get_registered_tools(server) -> Dict[str, Any]:
     """
     tools = {}
 
-    # FastMCP v3: access tools via local_provider._components
-    lp = getattr(server, "local_provider", None)
-    if lp is not None:
-        components = getattr(lp, "_components", {})
-        for key, tool in components.items():
-            if not key.startswith("tool:"):
-                continue
-            name = key.split(":", 1)[1].rsplit("@", 1)[0]
-            tools[name] = {
-                "name": name,
-                "description": getattr(tool, "description", None)
-                or _extract_docstring(tool),
-                "parameters": _extract_parameters(tool),
-                "tool_obj": tool,
-            }
+    for name, tool in _get_tool_components(server).items():
+        tools[name] = {
+            "name": name,
+            "description": getattr(tool, "description", None)
+            or _extract_docstring(tool),
+            "parameters": _extract_parameters(tool),
+            "tool_obj": tool,
+        }
 
     return tools
 

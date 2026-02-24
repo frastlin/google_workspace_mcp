@@ -83,8 +83,13 @@ def _get_tool_components(server) -> dict:
     """Get tool components dict from server's local_provider.
 
     Returns a dict mapping tool_name -> tool_object for introspection.
+
+    Note: Uses local_provider._components because the public list_tools()
+    is async-only, and callers (startup filtering, CLI) run synchronously.
     """
-    lp = server.local_provider
+    lp = getattr(server, "local_provider", None)
+    if lp is None:
+        return {}
     components = getattr(lp, "_components", {})
     tools = {}
     for key, component in components.items():
@@ -103,7 +108,6 @@ def filter_server_tools(server):
         return
 
     tools_removed = 0
-    lp = server.local_provider
     tool_components = _get_tool_components(server)
 
     read_only_mode = is_read_only_mode()
@@ -144,7 +148,7 @@ def filter_server_tools(server):
                     tools_to_remove.add(tool_name)
 
     for tool_name in tools_to_remove:
-        lp.remove_tool(tool_name)
+        server.local_provider.remove_tool(tool_name)
         tools_removed += 1
 
     if tools_removed > 0:

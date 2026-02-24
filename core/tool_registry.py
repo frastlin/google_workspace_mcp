@@ -104,7 +104,7 @@ def filter_server_tools(server):
     """Remove disabled tools from the server after registration."""
     enabled_tools = get_enabled_tools()
     oauth21_enabled = is_oauth21_enabled()
-    if enabled_tools is None and not oauth21_enabled:
+    if enabled_tools is None and not oauth21_enabled and not is_read_only_mode():
         return
 
     tools_removed = 0

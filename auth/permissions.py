@@ -108,20 +108,26 @@ SERVICE_PERMISSION_LEVELS: Dict[str, List[Tuple[str, List[str]]]] = {
         ("full", [CUSTOM_SEARCH_SCOPE]),
     ],
     "appscript": [
-        ("readonly", [
-            SCRIPT_PROJECTS_READONLY_SCOPE,
-            SCRIPT_DEPLOYMENTS_READONLY_SCOPE,
-            SCRIPT_PROCESSES_READONLY_SCOPE,
-            SCRIPT_METRICS_SCOPE,
-            DRIVE_READONLY_SCOPE,
-        ]),
-        ("full", [
-            SCRIPT_PROJECTS_SCOPE,
-            SCRIPT_DEPLOYMENTS_SCOPE,
-            SCRIPT_PROCESSES_READONLY_SCOPE,
-            SCRIPT_METRICS_SCOPE,
-            DRIVE_FILE_SCOPE,
-        ]),
+        (
+            "readonly",
+            [
+                SCRIPT_PROJECTS_READONLY_SCOPE,
+                SCRIPT_DEPLOYMENTS_READONLY_SCOPE,
+                SCRIPT_PROCESSES_READONLY_SCOPE,
+                SCRIPT_METRICS_SCOPE,
+                DRIVE_READONLY_SCOPE,
+            ],
+        ),
+        (
+            "full",
+            [
+                SCRIPT_PROJECTS_SCOPE,
+                SCRIPT_DEPLOYMENTS_SCOPE,
+                SCRIPT_PROCESSES_READONLY_SCOPE,
+                SCRIPT_METRICS_SCOPE,
+                DRIVE_FILE_SCOPE,
+            ],
+        ),
     ],
 }
 

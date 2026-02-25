@@ -306,9 +306,7 @@ def main():
         if args.tool_tier is not None:
             # Combine with tier filtering within the permission-selected services
             try:
-                tier_tools, _ = resolve_tools_from_tier(
-                    args.tool_tier, tools_to_import
-                )
+                tier_tools, _ = resolve_tools_from_tier(args.tool_tier, tools_to_import)
                 set_enabled_tool_names(set(tier_tools))
             except Exception as e:
                 safe_print(f"❌ Error loading tools for tier '{args.tool_tier}': {e}")

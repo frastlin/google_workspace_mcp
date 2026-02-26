@@ -7,11 +7,16 @@ This module provides MCP tools for interacting with the Gmail API.
 import logging
 import asyncio
 import base64
+import json
+import mimetypes
 import ssl
 from html.parser import HTMLParser
 from typing import Optional, List, Dict, Literal, Any
 
 from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 
 from fastapi import Body
 from pydantic import Field
@@ -235,9 +240,10 @@ def _prepare_gmail_message(
     references: Optional[str] = None,
     body_format: Literal["plain", "html"] = "plain",
     from_email: Optional[str] = None,
+    attachments: Optional[List[Dict[str, str]]] = None,
 ) -> tuple[str, Optional[str]]:
     """
-    Prepare a Gmail message with threading support.
+    Prepare a Gmail message with threading and attachment support.
 
     Args:
         subject: Email subject
@@ -250,6 +256,8 @@ def _prepare_gmail_message(
         references: Optional chain of Message-IDs for proper threading
         body_format: Content type for the email body ('plain' or 'html')
         from_email: Optional sender email address
+        attachments: Optional list of resolved attachment dicts with keys:
+            filename, mime_type, content_base64
 
     Returns:
         Tuple of (raw_message, thread_id) where raw_message is base64 encoded
@@ -264,7 +272,24 @@ def _prepare_gmail_message(
     if normalized_format not in {"plain", "html"}:
         raise ValueError("body_format must be either 'plain' or 'html'.")
 
-    message = MIMEText(body, normalized_format)
+    if attachments:
+        # Build multipart message with body + attachments
+        message = MIMEMultipart("mixed")
+        body_part = MIMEText(body, normalized_format)
+        message.attach(body_part)
+
+        for att in attachments:
+            maintype, subtype = att["mime_type"].split("/", 1)
+            part = MIMEBase(maintype, subtype)
+            part.set_payload(base64.b64decode(att["content_base64"]))
+            encoders.encode_base64(part)
+            part.add_header(
+                "Content-Disposition", "attachment", filename=att["filename"]
+            )
+            message.attach(part)
+    else:
+        message = MIMEText(body, normalized_format)
+
     message["Subject"] = reply_subject
 
     # Add sender if provided
@@ -290,6 +315,115 @@ def _prepare_gmail_message(
     raw_message = base64.urlsafe_b64encode(message.as_bytes()).decode()
 
     return raw_message, thread_id
+
+
+MAX_ATTACHMENT_SIZE = 25 * 1024 * 1024  # 25 MB
+
+
+async def _resolve_attachments(
+    service, attachments_json: Optional[str]
+) -> Optional[List[Dict[str, str]]]:
+    """
+    Parse and resolve attachment JSON into a list of dicts ready for MIME construction.
+
+    Supports two shapes:
+      - Shape A (inline): {filename, mime_type?, content_base64}
+      - Shape B (Gmail ref): {filename, mime_type?, source_message_id, source_attachment_id}
+
+    Args:
+        service: Gmail API service object
+        attachments_json: JSON string of attachment objects, or None
+
+    Returns:
+        List of resolved attachment dicts with keys: filename, mime_type, content_base64
+        Returns None if input is None or empty string.
+
+    Raises:
+        ValueError: On invalid JSON, missing fields, bad base64, or oversized attachments.
+    """
+    if not attachments_json:
+        return None
+
+    try:
+        items = json.loads(attachments_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid attachments JSON: {e}")
+
+    if not isinstance(items, list):
+        raise ValueError("Attachments must be a JSON array")
+
+    if len(items) == 0:
+        return None
+
+    resolved = []
+    for item in items:
+        if not isinstance(item, dict):
+            raise ValueError("Each attachment must be a JSON object")
+
+        filename = item.get("filename")
+        if not filename:
+            raise ValueError("Each attachment must have a 'filename' field")
+
+        # Determine mime_type
+        mime_type = item.get("mime_type")
+        if not mime_type:
+            guessed, _ = mimetypes.guess_type(filename)
+            mime_type = guessed or "application/octet-stream"
+
+        content_base64 = item.get("content_base64")
+        source_message_id = item.get("source_message_id")
+        source_attachment_id = item.get("source_attachment_id")
+
+        if content_base64:
+            # Shape A - validate base64
+            try:
+                decoded = base64.b64decode(content_base64)
+            except Exception:
+                raise ValueError(
+                    f"Invalid base64 content for attachment '{filename}'"
+                )
+            if len(decoded) > MAX_ATTACHMENT_SIZE:
+                raise ValueError(
+                    f"Attachment '{filename}' exceeds 25MB size limit "
+                    f"({len(decoded)} bytes)"
+                )
+        elif source_message_id and source_attachment_id:
+            # Shape B - download from Gmail API
+            attachment_data = await asyncio.to_thread(
+                service.users()
+                .messages()
+                .attachments()
+                .get(
+                    userId="me",
+                    messageId=source_message_id,
+                    id=source_attachment_id,
+                )
+                .execute
+            )
+            raw_data = attachment_data.get("data", "")
+            # Gmail API returns url-safe base64; convert to standard base64
+            content_base64 = raw_data.replace("-", "+").replace("_", "/")
+            decoded = base64.b64decode(content_base64)
+            if len(decoded) > MAX_ATTACHMENT_SIZE:
+                raise ValueError(
+                    f"Attachment '{filename}' exceeds 25MB size limit "
+                    f"({len(decoded)} bytes)"
+                )
+        else:
+            raise ValueError(
+                f"Attachment '{filename}' must have either 'content_base64' "
+                f"or both 'source_message_id' and 'source_attachment_id'"
+            )
+
+        resolved.append(
+            {
+                "filename": filename,
+                "mime_type": mime_type,
+                "content_base64": content_base64,
+            }
+        )
+
+    return resolved
 
 
 def _generate_gmail_web_url(item_id: str, account_index: int = 0) -> str:
@@ -919,10 +1053,15 @@ async def send_gmail_message(
     references: Optional[str] = Body(
         None, description="Optional chain of Message-IDs for proper threading."
     ),
+    attachments: Optional[str] = Body(
+        None,
+        description='Optional JSON array of attachment objects. Each object needs "filename" and either "content_base64" (inline data) or "source_message_id"+"source_attachment_id" (Gmail reference). Optional "mime_type" is guessed from filename if omitted.',
+    ),
 ) -> str:
     """
     Sends an email using the user's Gmail account. Supports both new emails and replies.
     Supports Gmail's "Send As" feature to send from configured alias addresses.
+    Supports file attachments via inline base64 or Gmail attachment references.
 
     Args:
         to (str): Recipient email address.
@@ -984,9 +1123,43 @@ async def send_gmail_message(
     logger.info(
         f"[send_gmail_message] Invoked. Email: '{user_google_email}', Subject: '{subject}'"
     )
+    return await _send_gmail_message_impl(
+        service=service,
+        user_google_email=user_google_email,
+        to=to,
+        subject=subject,
+        body=body,
+        body_format=body_format,
+        cc=cc,
+        bcc=bcc,
+        from_email=from_email,
+        thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        attachments=attachments,
+    )
+
+
+async def _send_gmail_message_impl(
+    service,
+    user_google_email: str,
+    to: str,
+    subject: str,
+    body: str,
+    body_format: str = "plain",
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    from_email: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
+    attachments: Optional[str] = None,
+) -> str:
+    """Internal implementation for sending a Gmail message with optional attachments."""
+    # Resolve attachments from JSON
+    resolved_attachments = await _resolve_attachments(service, attachments)
 
     # Prepare the email message
-    # Use from_email (Send As alias) if provided, otherwise default to authenticated user
     sender_email = from_email or user_google_email
     raw_message, thread_id_final = _prepare_gmail_message(
         subject=subject,
@@ -999,6 +1172,7 @@ async def send_gmail_message(
         references=references,
         body_format=body_format,
         from_email=sender_email,
+        attachments=resolved_attachments,
     )
 
     send_body = {"raw": raw_message}
@@ -1043,10 +1217,15 @@ async def draft_gmail_message(
     references: Optional[str] = Body(
         None, description="Optional chain of Message-IDs for proper threading."
     ),
+    attachments: Optional[str] = Body(
+        None,
+        description='Optional JSON array of attachment objects. Each object needs "filename" and either "content_base64" (inline data) or "source_message_id"+"source_attachment_id" (Gmail reference). Optional "mime_type" is guessed from filename if omitted.',
+    ),
 ) -> str:
     """
     Creates a draft email in the user's Gmail account. Supports both new drafts and reply drafts.
     Supports Gmail's "Send As" feature to draft from configured alias addresses.
+    Supports file attachments via inline base64 or Gmail attachment references.
 
     Args:
         user_google_email (str): The user's Google email address. Required for authentication.
@@ -1062,6 +1241,7 @@ async def draft_gmail_message(
         thread_id (Optional[str]): Optional Gmail thread ID to reply within. When provided, creates a reply draft.
         in_reply_to (Optional[str]): Optional Message-ID of the message being replied to. Used for proper threading.
         references (Optional[str]): Optional chain of Message-IDs for proper threading. Should include all previous Message-IDs.
+        attachments (Optional[str]): Optional JSON array of attachment objects.
 
     Returns:
         str: Confirmation message with the created draft's ID.
@@ -1121,9 +1301,43 @@ async def draft_gmail_message(
     logger.info(
         f"[draft_gmail_message] Invoked. Email: '{user_google_email}', Subject: '{subject}'"
     )
+    return await _draft_gmail_message_impl(
+        service=service,
+        user_google_email=user_google_email,
+        subject=subject,
+        body=body,
+        body_format=body_format,
+        to=to,
+        cc=cc,
+        bcc=bcc,
+        from_email=from_email,
+        thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        attachments=attachments,
+    )
+
+
+async def _draft_gmail_message_impl(
+    service,
+    user_google_email: str,
+    subject: str,
+    body: str,
+    body_format: str = "plain",
+    to: Optional[str] = None,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    from_email: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
+    attachments: Optional[str] = None,
+) -> str:
+    """Internal implementation for creating a Gmail draft with optional attachments."""
+    # Resolve attachments from JSON
+    resolved_attachments = await _resolve_attachments(service, attachments)
 
     # Prepare the email message
-    # Use from_email (Send As alias) if provided, otherwise default to authenticated user
     sender_email = from_email or user_google_email
     raw_message, thread_id_final = _prepare_gmail_message(
         subject=subject,
@@ -1136,6 +1350,7 @@ async def draft_gmail_message(
         in_reply_to=in_reply_to,
         references=references,
         from_email=sender_email,
+        attachments=resolved_attachments,
     )
 
     # Create a draft instead of sending
@@ -1757,3 +1972,166 @@ async def batch_modify_gmail_message_labels(
         actions.append(f"Removed labels: {', '.join(remove_label_ids)}")
 
     return f"Labels updated for {len(message_ids)} messages: {'; '.join(actions)}"
+
+
+async def _forward_gmail_message_impl(
+    service,
+    user_google_email: str,
+    message_id: str,
+    to: str,
+    body: str = "",
+    body_format: str = "plain",
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    from_email: Optional[str] = None,
+    include_attachments: bool = True,
+) -> str:
+    """Internal implementation for forwarding a Gmail message."""
+    # Fetch original message
+    original = await asyncio.to_thread(
+        service.users()
+        .messages()
+        .get(userId="me", id=message_id, format="full")
+        .execute
+    )
+
+    payload = original.get("payload", {})
+    headers = _extract_headers(
+        payload, ["Subject", "From", "To", "Date", "Message-ID"]
+    )
+
+    orig_subject = headers.get("Subject", "(no subject)")
+    orig_from = headers.get("From", "(unknown)")
+    orig_to = headers.get("To", "")
+    orig_date = headers.get("Date", "(unknown date)")
+
+    # Build forwarded subject
+    if orig_subject.lower().startswith("fwd:"):
+        fwd_subject = orig_subject
+    else:
+        fwd_subject = f"Fwd: {orig_subject}"
+
+    # Extract original body
+    bodies = _extract_message_bodies(payload)
+    orig_text = bodies.get("text", "")
+    orig_html = bodies.get("html", "")
+    orig_body = _format_body_content(orig_text, orig_html)
+
+    # Build forwarded body with quoted original
+    separator = "\n\n---------- Forwarded message ----------\n"
+    quoted_headers = (
+        f"From: {orig_from}\n"
+        f"Date: {orig_date}\n"
+        f"Subject: {orig_subject}\n"
+        f"To: {orig_to}\n"
+    )
+    forwarded_body = f"{body}{separator}{quoted_headers}\n{orig_body}"
+
+    # Resolve original attachments if requested
+    resolved_attachments = None
+    if include_attachments:
+        orig_attachments = _extract_attachments(payload)
+        if orig_attachments:
+            att_list = []
+            for att in orig_attachments:
+                attachment_data = await asyncio.to_thread(
+                    service.users()
+                    .messages()
+                    .attachments()
+                    .get(
+                        userId="me",
+                        messageId=message_id,
+                        id=att["attachmentId"],
+                    )
+                    .execute
+                )
+                raw_data = attachment_data.get("data", "")
+                # Gmail API returns url-safe base64; convert to standard
+                content_b64 = raw_data.replace("-", "+").replace("_", "/")
+                att_list.append(
+                    {
+                        "filename": att["filename"],
+                        "mime_type": att["mimeType"],
+                        "content_base64": content_b64,
+                    }
+                )
+            resolved_attachments = att_list
+
+    # Prepare and send
+    sender_email = from_email or user_google_email
+    raw_message, _ = _prepare_gmail_message(
+        subject=fwd_subject,
+        body=forwarded_body,
+        to=to,
+        cc=cc,
+        bcc=bcc,
+        body_format=body_format,
+        from_email=sender_email,
+        attachments=resolved_attachments,
+    )
+
+    send_body = {"raw": raw_message}
+    sent_message = await asyncio.to_thread(
+        service.users().messages().send(userId="me", body=send_body).execute
+    )
+    new_message_id = sent_message.get("id")
+    return f"Message forwarded! Message ID: {new_message_id}"
+
+
+@server.tool()
+@handle_http_errors("forward_gmail_message", service_type="gmail")
+@require_google_service("gmail", GMAIL_SEND_SCOPE)
+async def forward_gmail_message(
+    service,
+    user_google_email: str,
+    message_id: str = Body(..., description="The ID of the Gmail message to forward."),
+    to: str = Body(..., description="Recipient email address to forward to."),
+    body: str = Body("", description="Optional text to prepend before the forwarded message."),
+    body_format: Literal["plain", "html"] = Body(
+        "plain",
+        description="Body format. Use 'plain' for plaintext or 'html' for HTML content.",
+    ),
+    cc: Optional[str] = Body(None, description="Optional CC email address."),
+    bcc: Optional[str] = Body(None, description="Optional BCC email address."),
+    from_email: Optional[str] = Body(
+        None,
+        description="Optional 'Send As' alias email address.",
+    ),
+    include_attachments: bool = Body(
+        True,
+        description="Whether to include the original message's attachments. Defaults to True.",
+    ),
+) -> str:
+    """
+    Forwards a Gmail message to another recipient. Includes the original message content
+    and optionally its attachments.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required.
+        message_id (str): The ID of the Gmail message to forward.
+        to (str): Recipient email address to forward to.
+        body (str): Optional text to prepend before the forwarded message.
+        body_format (Literal['plain', 'html']): Body format. Defaults to 'plain'.
+        cc (Optional[str]): Optional CC email address.
+        bcc (Optional[str]): Optional BCC email address.
+        from_email (Optional[str]): Optional 'Send As' alias email address.
+        include_attachments (bool): Whether to include original attachments. Defaults to True.
+
+    Returns:
+        str: Confirmation message with the forwarded message's ID.
+    """
+    logger.info(
+        f"[forward_gmail_message] Invoked. Email: '{user_google_email}', Message ID: '{message_id}'"
+    )
+    return await _forward_gmail_message_impl(
+        service=service,
+        user_google_email=user_google_email,
+        message_id=message_id,
+        to=to,
+        body=body,
+        body_format=body_format,
+        cc=cc,
+        bcc=bcc,
+        from_email=from_email,
+        include_attachments=include_attachments,
+    )

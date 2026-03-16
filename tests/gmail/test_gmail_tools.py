@@ -1,5 +1,5 @@
 """
-Unit tests for the forward_gmail_message tool.
+Unit tests for Gmail tools: forward, update draft, delete draft.
 """
 
 import base64
@@ -11,7 +11,11 @@ import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
-from gmail.gmail_tools import _forward_gmail_message_impl
+from gmail.gmail_tools import (
+    _forward_gmail_message_impl,
+    _update_gmail_draft_impl,
+    _delete_gmail_draft_impl,
+)
 
 
 def _decode_raw_message(raw_b64: str) -> email.message.Message:
@@ -236,3 +240,122 @@ class TestForwardGmailMessageImpl:
             body="",
         )
         assert "fwd_nobody" in result
+
+
+class TestUpdateGmailDraftImpl:
+
+    @pytest.mark.asyncio
+    async def test_update_draft_basic(self):
+        """Updates a draft with new subject/body, returns draft ID."""
+        service = _make_mock_service()
+        service.users().drafts().update().execute.return_value = {
+            "id": "draft_updated_123"
+        }
+
+        result = await _update_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="draft_123",
+            subject="Updated Subject",
+            body="Updated body text",
+            to="recipient@example.com",
+        )
+        assert "draft_updated_123" in result
+        assert "updated" in result.lower()
+        service.users().drafts().update.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_update_draft_preserves_thread(self):
+        """When thread_id is passed, it appears in the draft body sent to API."""
+        service = _make_mock_service()
+        update_calls = []
+
+        def capture_update(**kwargs):
+            update_calls.append(kwargs)
+            mock_resp = MagicMock()
+            mock_resp.execute.return_value = {"id": "draft_thread_456"}
+            return mock_resp
+
+        service.users().drafts().update.side_effect = capture_update
+
+        result = await _update_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="draft_456",
+            subject="Threaded reply",
+            body="Reply body",
+            thread_id="thread_789",
+        )
+        assert "draft_thread_456" in result
+        assert len(update_calls) == 1
+        draft_body = update_calls[0]["body"]
+        assert draft_body["message"]["threadId"] == "thread_789"
+
+    @pytest.mark.asyncio
+    async def test_update_draft_with_attachments(self):
+        """Passing attachments is reflected in the return message."""
+        service = _make_mock_service()
+        service.users().drafts().update().execute.return_value = {
+            "id": "draft_att_789"
+        }
+
+        result = await _update_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="draft_789",
+            subject="With attachment",
+            body="See attached",
+            attachments=[
+                {"content": "dGVzdA==", "filename": "test.txt"},
+            ],
+        )
+        assert "draft_att_789" in result
+        assert "1 attachment" in result
+
+    @pytest.mark.asyncio
+    async def test_update_draft_html_body(self):
+        """HTML body_format doesn't raise an error."""
+        service = _make_mock_service()
+        service.users().drafts().update().execute.return_value = {
+            "id": "draft_html_101"
+        }
+
+        result = await _update_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="draft_101",
+            subject="HTML Draft",
+            body="<h1>Hello</h1>",
+            body_format="html",
+        )
+        assert "draft_html_101" in result
+
+
+class TestDeleteGmailDraftImpl:
+
+    @pytest.mark.asyncio
+    async def test_delete_draft_basic(self):
+        """Deletes a draft and confirms via return string."""
+        service = _make_mock_service()
+        service.users().drafts().delete().execute.return_value = None
+
+        result = await _delete_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="draft_to_delete",
+        )
+        assert "deleted" in result.lower()
+        service.users().drafts().delete.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_delete_draft_returns_confirmation(self):
+        """Return message contains the draft_id."""
+        service = _make_mock_service()
+        service.users().drafts().delete().execute.return_value = None
+
+        result = await _delete_gmail_draft_impl(
+            service=service,
+            user_google_email="me@example.com",
+            draft_id="specific_draft_id",
+        )
+        assert "specific_draft_id" in result

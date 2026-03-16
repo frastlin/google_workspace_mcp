@@ -1394,6 +1394,194 @@ async def draft_gmail_message(
     return f"Draft created{attachment_info}! Draft ID: {draft_id}"
 
 
+async def _update_gmail_draft_impl(
+    service,
+    user_google_email: str,
+    draft_id: str,
+    subject: str,
+    body: str,
+    body_format: str = "plain",
+    to: Optional[str] = None,
+    cc: Optional[str] = None,
+    bcc: Optional[str] = None,
+    from_name: Optional[str] = None,
+    from_email: Optional[str] = None,
+    thread_id: Optional[str] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[str] = None,
+    attachments: Optional[List[Dict[str, str]]] = None,
+) -> str:
+    """Internal implementation for updating an existing Gmail draft."""
+    sender_email = from_email or user_google_email
+    raw_message, thread_id_final = _prepare_gmail_message(
+        subject=subject,
+        body=body,
+        body_format=body_format,
+        to=to,
+        cc=cc,
+        bcc=bcc,
+        thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        from_email=sender_email,
+        from_name=from_name,
+        attachments=attachments,
+    )
+
+    draft_body = {"message": {"raw": raw_message}}
+    if thread_id_final:
+        draft_body["message"]["threadId"] = thread_id_final
+
+    updated_draft = await asyncio.to_thread(
+        service.users()
+        .drafts()
+        .update(userId="me", id=draft_id, body=draft_body)
+        .execute
+    )
+    updated_draft_id = updated_draft.get("id")
+    attachment_info = f" with {len(attachments)} attachment(s)" if attachments else ""
+    return f"Draft updated{attachment_info}! Draft ID: {updated_draft_id}"
+
+
+@server.tool()
+@handle_http_errors("update_gmail_draft", service_type="gmail")
+@require_google_service("gmail", GMAIL_COMPOSE_SCOPE)
+async def update_gmail_draft(
+    service,
+    user_google_email: str,
+    draft_id: Annotated[
+        str, Field(description="The ID of the existing draft to update.")
+    ],
+    subject: Annotated[str, Field(description="Email subject.")],
+    body: Annotated[str, Field(description="Email body.")],
+    body_format: Annotated[
+        Literal["plain", "html"],
+        Field(description="Email body format. Use 'plain' for plaintext or 'html' for HTML content."),
+    ] = "plain",
+    to: Annotated[
+        Optional[str],
+        Field(description="Optional recipient email address."),
+    ] = None,
+    cc: Annotated[
+        Optional[str], Field(description="Optional CC email address.")
+    ] = None,
+    bcc: Annotated[
+        Optional[str], Field(description="Optional BCC email address.")
+    ] = None,
+    from_name: Annotated[
+        Optional[str],
+        Field(description="Optional sender display name."),
+    ] = None,
+    from_email: Annotated[
+        Optional[str],
+        Field(description="Optional 'Send As' alias email address."),
+    ] = None,
+    thread_id: Annotated[
+        Optional[str],
+        Field(description="Optional Gmail thread ID to reply within."),
+    ] = None,
+    in_reply_to: Annotated[
+        Optional[str],
+        Field(description="Optional Message-ID of the message being replied to."),
+    ] = None,
+    references: Annotated[
+        Optional[str],
+        Field(description="Optional chain of Message-IDs for proper threading."),
+    ] = None,
+    attachments: Annotated[
+        Optional[List[Dict[str, str]]],
+        Field(
+            description="Optional list of attachments. Each can have: 'path' (file path, auto-encodes), OR 'content' (standard base64) + 'filename'. Optional 'mime_type'.",
+        ),
+    ] = None,
+) -> str:
+    """
+    Updates an existing draft email in the user's Gmail account. Replaces the draft's content
+    with the new subject, body, recipients, and attachments provided.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required for authentication.
+        draft_id (str): The ID of the existing draft to update.
+        subject (str): Email subject.
+        body (str): Email body.
+        body_format (Literal['plain', 'html']): Email body format. Defaults to 'plain'.
+        to (Optional[str]): Optional recipient email address.
+        cc (Optional[str]): Optional CC email address.
+        bcc (Optional[str]): Optional BCC email address.
+        from_name (Optional[str]): Optional sender display name.
+        from_email (Optional[str]): Optional 'Send As' alias email address.
+        thread_id (Optional[str]): Optional Gmail thread ID.
+        in_reply_to (Optional[str]): Optional Message-ID being replied to.
+        references (Optional[str]): Optional Message-ID chain for threading.
+        attachments (Optional[List[Dict[str, str]]]): Optional attachments list.
+
+    Returns:
+        str: Confirmation message with the updated draft's ID.
+    """
+    logger.info(
+        f"[update_gmail_draft] Invoked. Email: '{user_google_email}', Draft ID: '{draft_id}'"
+    )
+    return await _update_gmail_draft_impl(
+        service=service,
+        user_google_email=user_google_email,
+        draft_id=draft_id,
+        subject=subject,
+        body=body,
+        body_format=body_format,
+        to=to,
+        cc=cc,
+        bcc=bcc,
+        from_name=from_name,
+        from_email=from_email,
+        thread_id=thread_id,
+        in_reply_to=in_reply_to,
+        references=references,
+        attachments=attachments,
+    )
+
+
+async def _delete_gmail_draft_impl(
+    service,
+    user_google_email: str,
+    draft_id: str,
+) -> str:
+    """Internal implementation for deleting a Gmail draft."""
+    await asyncio.to_thread(
+        service.users().drafts().delete(userId="me", id=draft_id).execute
+    )
+    return f"Draft deleted! Draft ID: {draft_id}"
+
+
+@server.tool()
+@handle_http_errors("delete_gmail_draft", service_type="gmail")
+@require_google_service("gmail", GMAIL_COMPOSE_SCOPE)
+async def delete_gmail_draft(
+    service,
+    user_google_email: str,
+    draft_id: Annotated[
+        str, Field(description="The ID of the draft to delete.")
+    ],
+) -> str:
+    """
+    Permanently deletes a draft email from the user's Gmail account.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required for authentication.
+        draft_id (str): The ID of the draft to delete.
+
+    Returns:
+        str: Confirmation message with the deleted draft's ID.
+    """
+    logger.info(
+        f"[delete_gmail_draft] Invoked. Email: '{user_google_email}', Draft ID: '{draft_id}'"
+    )
+    return await _delete_gmail_draft_impl(
+        service=service,
+        user_google_email=user_google_email,
+        draft_id=draft_id,
+    )
+
+
 def _format_thread_content(thread_data: dict, thread_id: str) -> str:
     """
     Helper function to format thread content from Gmail API response.

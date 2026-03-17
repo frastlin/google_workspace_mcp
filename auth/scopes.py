@@ -66,10 +66,6 @@ TASKS_READONLY_SCOPE = "https://www.googleapis.com/auth/tasks.readonly"
 CONTACTS_SCOPE = "https://www.googleapis.com/auth/contacts"
 CONTACTS_READONLY_SCOPE = "https://www.googleapis.com/auth/contacts.readonly"
 
-# Google Keep API scopes
-KEEP_SCOPE = "https://www.googleapis.com/auth/keep"
-KEEP_READONLY_SCOPE = "https://www.googleapis.com/auth/keep.readonly"
-
 # Google Custom Search API scope
 CUSTOM_SEARCH_SCOPE = "https://www.googleapis.com/auth/cse"
 
@@ -102,7 +98,6 @@ SCOPE_HIERARCHY = {
     SLIDES_SCOPE: {SLIDES_READONLY_SCOPE},
     TASKS_SCOPE: {TASKS_READONLY_SCOPE},
     CONTACTS_SCOPE: {CONTACTS_READONLY_SCOPE},
-    KEEP_SCOPE: {KEEP_READONLY_SCOPE},
     CHAT_WRITE_SCOPE: {CHAT_READONLY_SCOPE},
     CHAT_SPACES_SCOPE: {CHAT_SPACES_READONLY_SCOPE},
     FORMS_BODY_SCOPE: {FORMS_BODY_READONLY_SCOPE},
@@ -178,8 +173,6 @@ TASKS_SCOPES = [TASKS_SCOPE, TASKS_READONLY_SCOPE]
 
 CONTACTS_SCOPES = [CONTACTS_SCOPE, CONTACTS_READONLY_SCOPE]
 
-KEEP_SCOPES = [KEEP_SCOPE, KEEP_READONLY_SCOPE]
-
 CUSTOM_SEARCH_SCOPES = [CUSTOM_SEARCH_SCOPE]
 
 SCRIPT_SCOPES = [
@@ -206,7 +199,7 @@ TOOL_SCOPES_MAP = {
     "contacts": CONTACTS_SCOPES,
     "search": CUSTOM_SEARCH_SCOPES,
     "appscript": SCRIPT_SCOPES,
-    "keep": KEEP_SCOPES,
+    "keep": [],
 }
 
 # Tool-to-read-only-scopes mapping
@@ -229,7 +222,7 @@ TOOL_READONLY_SCOPES_MAP = {
         SCRIPT_METRICS_SCOPE,
         DRIVE_READONLY_SCOPE,
     ],
-    "keep": [KEEP_READONLY_SCOPE],
+    "keep": [],
 }
 
 

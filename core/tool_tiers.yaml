@@ -201,17 +201,11 @@ appscript:
 
 keep:
   core:
-    - setup_keep_auth
     - list_keep_notes
     - get_keep_note
     - create_keep_note
     - create_keep_list
-  extended:
-    - update_keep_note
     - delete_keep_note
-    - search_keep_notes
-    - manage_keep_labels
-    - manage_keep_note_labels
-  complete:
-    - manage_keep_list_items
-    - undelete_keep_note
+    - share_keep_note
+  extended: []
+  complete: []

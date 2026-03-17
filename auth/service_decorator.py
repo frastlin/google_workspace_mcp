@@ -50,6 +50,8 @@ from auth.scopes import (
     CONTACTS_SCOPE,
     CONTACTS_READONLY_SCOPE,
     CUSTOM_SEARCH_SCOPE,
+    KEEP_SCOPE,
+    KEEP_READONLY_SCOPE,
     SCRIPT_PROJECTS_SCOPE,
     SCRIPT_PROJECTS_READONLY_SCOPE,
     SCRIPT_DEPLOYMENTS_SCOPE,
@@ -413,6 +415,7 @@ SERVICE_CONFIGS = {
     "people": {"service": "people", "version": "v1"},
     "customsearch": {"service": "customsearch", "version": "v1"},
     "script": {"service": "script", "version": "v1"},
+    "keep": {"service": "keep", "version": "v1"},
 }
 
 
@@ -462,6 +465,9 @@ SCOPE_GROUPS = {
     "script_projects": SCRIPT_PROJECTS_SCOPE,
     "script_deployments": SCRIPT_DEPLOYMENTS_SCOPE,
     "script_deployments_readonly": SCRIPT_DEPLOYMENTS_READONLY_SCOPE,
+    # Keep scopes
+    "keep": KEEP_SCOPE,
+    "keep_read": KEEP_READONLY_SCOPE,
 }
 
 

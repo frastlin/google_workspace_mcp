@@ -31,6 +31,7 @@ from core.config import get_transport_mode
 from gdrive.drive_helpers import (
     DRIVE_QUERY_PATTERNS,
     FOLDER_MIME_TYPE,
+    SHORTCUT_MIME_TYPE,
     build_drive_list_params,
     check_public_link_permission,
     format_permission_info,
@@ -492,6 +493,39 @@ async def _create_drive_folder_impl(
     )
 
 
+async def _create_drive_shortcut_impl(
+    service,
+    user_google_email: str,
+    target_id: str,
+    folder_id: str = "root",
+    name: str = None,
+) -> str:
+    """Internal implementation for creating a Drive shortcut. Used by tests."""
+    resolved_folder_id = await resolve_folder_id(service, folder_id)
+    file_metadata = {
+        "mimeType": SHORTCUT_MIME_TYPE,
+        "shortcutDetails": {"targetId": target_id},
+        "parents": [resolved_folder_id],
+    }
+    if name is not None:
+        file_metadata["name"] = name
+    created_file = await asyncio.to_thread(
+        service.files()
+        .create(
+            body=file_metadata,
+            fields="id, name, webViewLink, shortcutDetails",
+            supportsAllDrives=True,
+        )
+        .execute
+    )
+    link = created_file.get("webViewLink", "")
+    display_name = created_file.get("name", name or target_id)
+    return (
+        f"Successfully created shortcut '{display_name}' (ID: {created_file.get('id', 'N/A')}) "
+        f"pointing to '{target_id}' in folder '{folder_id}' for {user_google_email}. Link: {link}"
+    )
+
+
 @server.tool()
 @handle_http_errors("create_drive_folder", service_type="drive")
 @require_google_service("drive", "drive_file")
@@ -532,18 +566,30 @@ async def create_drive_file(
     folder_id: str = "root",
     mime_type: str = "text/plain",
     fileUrl: Optional[str] = None,  # Now explicitly Optional
+    target_id: Optional[str] = None,
 ) -> str:
     """
     Creates a new file in Google Drive, supporting creation within shared drives.
     Accepts either direct content or a fileUrl to fetch the content from.
 
+    Also supports creating shortcuts (links) to existing files or folders.
+    To create a shortcut, set mime_type to 'application/vnd.google-apps.shortcut'
+    and provide the target_id of the file or folder to link to.
+    Shortcuts work for both files and folders.
+
     Args:
         user_google_email (str): The user's Google email address. Required.
-        file_name (str): The name for the new file.
+        file_name (str): The name for the new file. For shortcuts, this becomes
+            the shortcut's display name; if omitted the API names it after the target.
         content (Optional[str]): If provided, the content to write to the file.
-        folder_id (str): The ID of the parent folder. Defaults to 'root'. For shared drives, this must be a folder ID within the shared drive.
+        folder_id (str): The ID of the parent folder. Defaults to 'root'.
+            For shared drives, this must be a folder ID within the shared drive.
         mime_type (str): The MIME type of the file. Defaults to 'text/plain'.
-        fileUrl (Optional[str]): If provided, fetches the file content from this URL. Supports file://, http://, and https:// protocols.
+            Use 'application/vnd.google-apps.shortcut' to create a shortcut.
+        fileUrl (Optional[str]): If provided, fetches the file content from this URL.
+            Supports file://, http://, and https:// protocols.
+        target_id (Optional[str]): The ID of the file or folder to create a shortcut to.
+            Required when mime_type is 'application/vnd.google-apps.shortcut'.
 
     Returns:
         str: Confirmation message of the successful file creation with file link.
@@ -552,13 +598,21 @@ async def create_drive_file(
         f"[create_drive_file] Invoked. Email: '{user_google_email}', File Name: {file_name}, Folder ID: {folder_id}, fileUrl: {fileUrl}"
     )
 
-    if content is None and fileUrl is None and mime_type != FOLDER_MIME_TYPE:
+    if content is None and fileUrl is None and mime_type not in (FOLDER_MIME_TYPE, SHORTCUT_MIME_TYPE):
         raise Exception("You must provide either 'content' or 'fileUrl'.")
 
     # Create folder (no content or media_body). Prefer create_drive_folder for new code.
     if mime_type == FOLDER_MIME_TYPE:
         return await _create_drive_folder_impl(
             service, user_google_email, file_name, folder_id
+        )
+
+    # Create shortcut (metadata-only, like folders).
+    if mime_type == SHORTCUT_MIME_TYPE:
+        if not target_id:
+            raise Exception("You must provide 'target_id' when creating a shortcut.")
+        return await _create_drive_shortcut_impl(
+            service, user_google_email, target_id, folder_id, file_name if file_name else None
         )
 
     file_data = None

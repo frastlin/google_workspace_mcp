@@ -164,8 +164,12 @@ async def test_create_drive_shortcut_folder_resolution():
 @pytest.mark.asyncio
 async def test_create_drive_file_delegates_to_shortcut():
     """Test that create_drive_file delegates to _create_drive_shortcut_impl for shortcut MIME type."""
-    from gdrive.drive_tools import _create_drive_shortcut_impl
     from gdrive.drive_tools import create_drive_file
+
+    # Unwrap the decorator chain: @server.tool -> @handle_http_errors -> @require_google_service -> func
+    unwrapped = create_drive_file
+    while hasattr(unwrapped, "__wrapped__"):
+        unwrapped = unwrapped.__wrapped__
 
     mock_service = Mock()
 
@@ -174,7 +178,7 @@ async def test_create_drive_file_delegates_to_shortcut():
         new_callable=AsyncMock,
         return_value="shortcut created",
     ) as mock_shortcut_impl:
-        result = await create_drive_file.__wrapped__.__wrapped__.__wrapped__(
+        result = await unwrapped(
             service=mock_service,
             user_google_email="user@example.com",
             file_name="My Link",

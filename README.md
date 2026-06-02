@@ -963,6 +963,10 @@ Saved files expire after 1 hour and are cleaned up automatically.
 | `get_spreadsheet_info` | Extended | Get spreadsheet metadata |
 | `format_sheet_range` | Extended | Apply colors, number formats, text wrapping, alignment, bold/italic, font size |
 | `create_sheet` | Complete | Add sheets to existing files |
+| `delete_sheet` | Complete | Delete a sheet (tab) by name or ID |
+| `rename_sheet` | Complete | Rename a sheet (tab) by name or ID |
+| `duplicate_sheet` | Complete | Duplicate a sheet (tab) with optional new name/index |
+| `reorder_sheet` | Complete | Move a sheet (tab) to a particular index |
 | `*_sheet_comment` | Complete | Read/create/reply/resolve comments |
 
 </td>

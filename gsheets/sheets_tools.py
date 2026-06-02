@@ -1425,6 +1425,75 @@ async def duplicate_sheet(
     return result
 
 
+async def _reorder_sheet_impl(
+    service,
+    spreadsheet_id: str,
+    new_index: int,
+    sheet_name: Optional[str] = None,
+    sheet_id: Optional[int] = None,
+) -> str:
+    resolved_id = await _resolve_sheet_id(service, spreadsheet_id, sheet_name, sheet_id)
+    request_body = {
+        "requests": [
+            {
+                "updateSheetProperties": {
+                    "properties": {"sheetId": resolved_id, "index": new_index},
+                    "fields": "index",
+                }
+            }
+        ]
+    }
+    await asyncio.to_thread(
+        service.spreadsheets()
+        .batchUpdate(spreadsheetId=spreadsheet_id, body=request_body)
+        .execute
+    )
+    label = f"'{sheet_name}'" if sheet_name else f"ID {resolved_id}"
+    return (
+        f"Successfully moved sheet {label} (ID: {resolved_id}) to index {new_index} "
+        f"in spreadsheet {spreadsheet_id}."
+    )
+
+
+@server.tool()
+@handle_http_errors("reorder_sheet", service_type="sheets")
+@require_google_service("sheets", "sheets_write")
+async def reorder_sheet(
+    service,
+    user_google_email: str,
+    spreadsheet_id: str,
+    new_index: int,
+    sheet_name: Optional[str] = None,
+    sheet_id: Optional[int] = None,
+) -> str:
+    """
+    Moves a sheet (tab) to a particular zero-based index within an existing spreadsheet.
+
+    Note: Google's updateSheetProperties interprets `new_index` as the position
+    *before* the move is applied. To make a sheet visually appear at position N
+    after a sheet currently at index N, pass new_index=N+1. The value is sent to
+    Google unchanged so semantics match the Sheets API documentation.
+
+    Args:
+        user_google_email (str): The user's Google email address. Required.
+        spreadsheet_id (str): The ID of the spreadsheet. Required.
+        new_index (int): Zero-based target index for the sheet (before-the-move semantics). Required.
+        sheet_name (str): Name of the sheet to move. Optional if sheet_id is given.
+        sheet_id (int): Numeric sheetId of the sheet to move. Optional if sheet_name is given. Wins if both are provided.
+
+    Returns:
+        str: Confirmation message of the successful reorder.
+    """
+    logger.info(
+        f"[reorder_sheet] Invoked. Email: '{user_google_email}', Spreadsheet: {spreadsheet_id}, Sheet: {sheet_name or sheet_id}, NewIndex: {new_index}"
+    )
+    result = await _reorder_sheet_impl(
+        service, spreadsheet_id, new_index, sheet_name, sheet_id
+    )
+    logger.info(f"Successfully reordered sheet for {user_google_email}.")
+    return result
+
+
 # Create comment management tools for sheets
 _comment_tools = create_comment_tools("spreadsheet", "spreadsheet_id")
 

@@ -11,6 +11,9 @@ from .sheets_tools import (
     modify_sheet_values,
     create_spreadsheet,
     create_sheet,
+    delete_sheet,
+    rename_sheet,
+    duplicate_sheet,
 )
 
 __all__ = [
@@ -20,4 +23,7 @@ __all__ = [
     "modify_sheet_values",
     "create_spreadsheet",
     "create_sheet",
+    "delete_sheet",
+    "rename_sheet",
+    "duplicate_sheet",
 ]

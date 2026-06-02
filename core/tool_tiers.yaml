@@ -91,6 +91,9 @@ sheets:
     - format_sheet_range
   complete:
     - create_sheet
+    - delete_sheet
+    - rename_sheet
+    - duplicate_sheet
     - read_spreadsheet_comments
     - create_spreadsheet_comment
     - reply_to_spreadsheet_comment
